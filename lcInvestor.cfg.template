@@ -1,10 +1,13 @@
 [AccountData]
-investorId = yourId
-authKey = yourAuthKey
+investorId = yourid
+authKey = YourAPIKEY
 reserveCash = 0.0
 investAmount = 25.00
 portfolioName = A Loans
+buyTradedNotes = 1
+buyLoans = 0
+
 [LoanCriteria]
 grade = A
-term = 36
+term = 19
 delinq2Yrs = 0

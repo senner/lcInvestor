@@ -11,3 +11,10 @@ buyLoans = 0
 grade = A
 term = 19
 delinq2Yrs = 0
+
+[TradedNotesCriteria]
+isNeverLate = "false"
+loanStatus = "SomeStatus"
+creditScoreTrend = "DOWN"
+remainingPayments = 99
+markupOrDiscount = 2

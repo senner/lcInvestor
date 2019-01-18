@@ -6,6 +6,7 @@ investAmount = 25.00
 portfolioName = A Loans
 buyTradedNotes = 1
 buyLoans = 0
+maxNoteAmount = 75
 
 [LoanCriteria]
 grade = A
@@ -18,4 +19,3 @@ loanStatus = "SomeStatus"
 creditScoreTrend = "DOWN"
 remainingPayments = 99
 markupOrDiscount = 2
-maxNoteAmount = 75

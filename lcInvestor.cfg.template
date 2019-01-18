@@ -18,3 +18,4 @@ loanStatus = "SomeStatus"
 creditScoreTrend = "DOWN"
 remainingPayments = 99
 markupOrDiscount = 2
+maxNoteAmount = 75

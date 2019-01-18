@@ -69,8 +69,7 @@ class ConfigData(object):
 
         self.reserveCash = self.castNum(
             cfgParser.get('AccountData', 'reserveCash'))
-        self.maxNoteAmount = self.castNum(
-            cfgParser.get('AccountData', 'maxNoteAmount'))
+
         self.investAmount = self.castNum(
             cfgParser.get('AccountData', 'investAmount'))
         # LC rules dictate that investments must be in multiples of $25
@@ -84,8 +83,8 @@ class ConfigData(object):
         for opt in criteriaOpts:
             self.criteria[opt] = self.castNum(
                 cfgParser.get('LoanCriteria', opt))
-            logger.debug('ConfigData init(), opt:' + opt +
-                         ' val:' + str(self.criteria[opt]))
+            logger.debug('ConfigData init(), opt:' + opt
+                         + ' val:' + str(self.criteria[opt]))
 
         criteriaTradedOpts = cfgParser.options(
             'TradedNotesCriteria')  # Traded Notes filtering criteria
@@ -93,8 +92,10 @@ class ConfigData(object):
         for opt in criteriaTradedOpts:
             self.criteriaTraded[opt] = self.castNum(
                 cfgParser.get('TradedNotesCriteria', opt))
-            logger.debug('ConfigData init(), opt:' + opt +
-                         ' val:' + str(self.criteriaTraded[opt]))
+            logger.debug('ConfigData init(), opt:' + opt
+                         + ' val:' + str(self.criteriaTraded[opt]))
+        self.maxNoteAmount = self.castNum(
+            cfgParser.get('AccountData', 'maxNoteAmount'))
 
         logger.debug('Exiting ConfigData init()')
 
@@ -219,8 +220,8 @@ class LendingClub(object):
             if numChecked == len(self.config.criteria):
                 loanDict[loan['id']] = loan['fundedAmount'] / \
                     loan['loanAmount']
-                logger.info('Loan id:' + str(loan['id'])
-                            + ' was a match, funded percentage = ' + str(loanDict[loan['id']]))
+                logger.info('Loan id:' + str(loan['id']) +
+                            ' was a match, funded percentage = ' + str(loanDict[loan['id']]))
         logger.debug('Exiting __getLoans()')
         return sorted(loanDict.items(), key=operator.itemgetter(1), reverse=True)
 
@@ -271,8 +272,8 @@ class LendingClub(object):
         Raises:
             HTTPError:  Any sort of HTTP 400/500 response returned from Lending Club.
         """
-        logger.debug('Entering __postOrder(), aid:' + str(aid) + ', loanId:' + str(loanId)
-                     + ', requestedAmount:' + str(requestedAmount) + ', portfolioId:' + str(portfolioId))
+        logger.debug('Entering __postOrder(), aid:' + str(aid) + ', loanId:' + str(loanId) +
+                     ', requestedAmount:' + str(requestedAmount) + ', portfolioId:' + str(portfolioId))
         payload = json.dumps({'aid': aid,
                               'orders': [{'loanId': loanId,
                                           'requestedAmount': float(requestedAmount),
@@ -290,8 +291,8 @@ class LendingClub(object):
 
         # Only 1 order is placed per call of this method.  Pull the first confirmation and log the amount invested.
         confirmation = retVal['orderConfirmations'][0]
-        logger.info('OrderId:' + str(retVal['orderInstructId']) + ', $'
-                    + str(confirmation['investedAmount']) + ' was invested in loanId:' + str(confirmation['loanId']))
+        logger.info('OrderId:' + str(retVal['orderInstructId']) + ', $' +
+                    str(confirmation['investedAmount']) + ' was invested in loanId:' + str(confirmation['loanId']))
         logger.debug('Exiting __postOrder()')
         return decimal.Decimal(str(confirmation['investedAmount']))
 
@@ -310,8 +311,8 @@ class LendingClub(object):
         logger.debug('Entering hasCash()')
 
         self.cash = self.__getCash()
-        logger.info('Cash at Lending Club: ' +
-                    str(self.cash.quantize(decimal.Decimal('.01'), decimal.ROUND_05UP)))
+        logger.info('Cash at Lending Club: '
+                    + str(self.cash.quantize(decimal.Decimal('.01'), decimal.ROUND_05UP)))
         investMin = self.cash - self.config.reserveCash - self.config.investAmount
         logger.debug('Exiting hasCash()')
         if (investMin >= 0):
@@ -336,8 +337,8 @@ class LendingClub(object):
         logger.debug('Entering hasLoans()')
         self.loans = self.__getLoans()
 
-        logger.info('Total number of matching loans available: ' +
-                    str(len(self.loans)))
+        logger.info('Total number of matching loans available: '
+                    + str(len(self.loans)))
 
         logger.debug('Exiting hasLoans()')
         return len(self.loans) > 0
@@ -411,8 +412,8 @@ class LendingClub(object):
         """
         logger.debug('Entering hasLoans()')
         self.notes = self.__getTradeNotes()
-        logger.info('Total number of matching Traded Notes available: ' +
-                    str(len(self.notes)))
+        logger.info('Total number of matching Traded Notes available: '
+                    + str(len(self.notes)))
 
         logger.debug('Exiting hasNotes()')
         return len(self.notes) > 0
@@ -450,8 +451,8 @@ class LendingClub(object):
             print retVal
             # Only 1 order is placed per call of this method.  Pull the first confirmation and log the amount invested.
             try:
-                logger.info(str(retVal['status']) + ' $'
-                            + float(noteInfo['price']) + ' was invested.')
+                logger.info(str(retVal['status']) + ' $' +
+                            float(noteInfo['price']) + ' was invested.')
                 logger.debug('Exiting __postNotesOrder()')
                 return decimal.Decimal(str(noteInfo['price']))
             except:
@@ -479,7 +480,7 @@ class LendingClub(object):
         for noteInfo in self.notes:
             if lc.hasCash():
                 logger.info('Have Cash buying notes. ')
-                if float(noteInfo['price']) < float(self.maxNoteAmount):
+                if float(noteInfo['price']) < float(self.config.maxNoteAmount):
                     self.cash -= self.__postNotesOrder(
                         self.config.investorId, noteInfo)
         logger.debug('Exiting buyNotes()')

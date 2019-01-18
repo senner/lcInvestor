@@ -1,7 +1,6 @@
 '''
 Created on Nov 21, 2015
 https://www.lendingclub.com/foliofn/folioInvestingAPIDocument.action
-http://public-resources.lendingclub.com.s3-website-us-west-2.amazonaws.com/SecondaryMarketAllNotes.csv
 
 @author: Joey Whelan
 '''
@@ -37,23 +36,6 @@ logger.addHandler(fh)
 logger.addHandler(ch)
 
 
-def pretty_print_POST(req):
-    """
-    At this point it is completely built and ready
-    to be fired; it is "prepared".
-
-    However pay attention at the formatting used in
-    this function because it is programmed to be pretty
-    printed and may differ from the actual request.
-    """
-    print('{}\n{}\n{}\n\n{}'.format(
-        '-----------START-----------',
-        req.method + ' ' + req.url,
-        '\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
-        req.body,
-    ))
-
-
 class ConfigData(object):
     """Class for fetching user-configurable options from a file.
     """
@@ -87,6 +69,8 @@ class ConfigData(object):
 
         self.reserveCash = self.castNum(
             cfgParser.get('AccountData', 'reserveCash'))
+        self.maxNoteAmount = self.castNum(
+            cfgParser.get('AccountData', 'maxNoteAmount'))
         self.investAmount = self.castNum(
             cfgParser.get('AccountData', 'investAmount'))
         # LC rules dictate that investments must be in multiples of $25
@@ -324,8 +308,8 @@ class LendingClub(object):
             HTTPError:  Any sort of HTTP 400/500 response returned from Lending Club.
         """
         logger.debug('Entering hasCash()')
-        if self.cash is None:
-            self.cash = self.__getCash()
+
+        self.cash = self.__getCash()
         logger.info('Cash at Lending Club: ' +
                     str(self.cash.quantize(decimal.Decimal('.01'), decimal.ROUND_05UP)))
         investMin = self.cash - self.config.reserveCash - self.config.investAmount
@@ -350,11 +334,10 @@ class LendingClub(object):
             HTTPError:  Any sort of HTTP 400/500 response returned from Lending Club.
         """
         logger.debug('Entering hasLoans()')
-        if self.loans is None:
-            self.loans = self.__getLoans()
+        self.loans = self.__getLoans()
 
-            logger.info('Total number of matching loans available: ' +
-                        str(len(self.loans)))
+        logger.info('Total number of matching loans available: ' +
+                    str(len(self.loans)))
 
         logger.debug('Exiting hasLoans()')
         return len(self.loans) > 0
@@ -381,7 +364,7 @@ class LendingClub(object):
         logger.debug('Exiting buy()')
 
     def __getTradeNotes(self):
-        """method to get the list of notes on trading plateform
+        """method to get the list of notes on trading platform
 
         """
         notesDict = []
@@ -427,10 +410,9 @@ class LendingClub(object):
             HTTPError:  Any sort of HTTP 400 / 500 response returned from Lending Club.
         """
         logger.debug('Entering hasLoans()')
-        if self.notes is None:
-            self.notes = self.__getTradeNotes()
-            logger.info('Total number of matching Traded Notes available: ' +
-                        str(len(self.notes)))
+        self.notes = self.__getTradeNotes()
+        logger.info('Total number of matching Traded Notes available: ' +
+                    str(len(self.notes)))
 
         logger.debug('Exiting hasNotes()')
         return len(self.notes) > 0
@@ -497,7 +479,7 @@ class LendingClub(object):
         for noteInfo in self.notes:
             if lc.hasCash():
                 logger.info('Have Cash buying notes. ')
-                if float(noteInfo['price']) < 75:
+                if float(noteInfo['price']) < float(self.maxNoteAmount):
                     self.cash -= self.__postNotesOrder(
                         self.config.investorId, noteInfo)
         logger.debug('Exiting buyNotes()')

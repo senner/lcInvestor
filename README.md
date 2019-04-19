@@ -8,4 +8,6 @@ Move lcInvestor.cfg.template to lcInvestor.cfg
 
 
 Works on the Standard Loans and on the Folio Notes trading.
+
+
 Python 3 compatible, and also does  multi loan orders and duplicate loan detection

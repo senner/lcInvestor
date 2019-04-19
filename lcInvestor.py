@@ -4,7 +4,7 @@ https://www.lendingclub.com/foliofn/folioInvestingAPIDocument.action
 
 @author: Joey Whelan
 '''
-import ConfigParser
+import configparser
 import logging.handlers
 import requests
 import json
@@ -14,23 +14,25 @@ from contextlib import closing
 import csv
 import datetime
 import time
-
+from io import TextIOWrapper
+import codecs
 
 CONFIG_FILENAME = 'lcInvestor.cfg'
 LOG_FILENAME = 'lcInvestor.log'
 
 # Global logger, console + rotating file
 logger = logging.getLogger('logapp')
-logger.setLevel(logging.INFO)
+# logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
 fh = logging.handlers.RotatingFileHandler(
     LOG_FILENAME, maxBytes=1000000, backupCount=2)
-fh.setLevel(logging.INFO)
+fh.setLevel(logging.Info)
 fh.setFormatter(formatter)
 
 ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
+ch.setLevel(logging.Info)
 ch.setFormatter(formatter)
 logger.addHandler(fh)
 logger.addHandler(ch)
@@ -55,7 +57,7 @@ class ConfigData(object):
             NoOptionError: Raised if option is missing in config file
         """
         logger.debug('Entering ConfigData init(), filename:' + filename)
-        cfgParser = ConfigParser.ConfigParser()
+        cfgParser = configparser.ConfigParser()
         cfgParser.optionxform = str
         cfgParser.read(filename)
         self.investorId = self.castNum(
@@ -83,8 +85,8 @@ class ConfigData(object):
         for opt in criteriaOpts:
             self.criteria[opt] = self.castNum(
                 cfgParser.get('LoanCriteria', opt))
-            logger.debug('ConfigData init(), opt:' + opt
-                         + ' val:' + str(self.criteria[opt]))
+            logger.debug('ConfigData init(), opt:' + opt +
+                         ' val:' + str(self.criteria[opt]))
 
         criteriaTradedOpts = cfgParser.options(
             'TradedNotesCriteria')  # Traded Notes filtering criteria
@@ -92,8 +94,8 @@ class ConfigData(object):
         for opt in criteriaTradedOpts:
             self.criteriaTraded[opt] = self.castNum(
                 cfgParser.get('TradedNotesCriteria', opt))
-            logger.debug('ConfigData init(), opt:' + opt
-                         + ' val:' + str(self.criteriaTraded[opt]))
+            logger.debug('ConfigData init(), opt:' + opt +
+                         ' val:' + str(self.criteriaTraded[opt]))
         self.maxNoteAmount = self.castNum(
             cfgParser.get('AccountData', 'maxNoteAmount'))
 
@@ -162,6 +164,11 @@ class LendingClub(object):
             '/accounts/' + str(self.config.investorId) + '/summary'
         self.loanListURL = 'https://api.lendingclub.com/api/investor/' + LendingClub.apiVersion + \
             '/loans/listing'
+
+        self.NotesOwnedUrl = 'https://api.lendingclub.com/api/investor/' + \
+            LendingClub.apiVersion + '/accounts/' + \
+            str(self.config.investorId) + '/notes'
+
         self.portfoliosURL = 'https://api.lendingclub.com/api/investor/' + LendingClub.apiVersion + \
             '/accounts/' + str(self.config.investorId) + '/portfolios'
         self.ordersURL = 'https://api.lendingclub.com/api/investor/' + LendingClub.apiVersion + \
@@ -206,22 +213,34 @@ class LendingClub(object):
         resp = requests.get(
             self.loanListURL, headers=self.header, params=payload)
         resp.raise_for_status()
-
         # Compare each available loan to the user's criteria.  Those that match, add the loanID and percentage
         # funded to a dictionary object.  Finally, return a sorted list (of tuples) based on percentage funded.
         loanDict = {}
+        logger.debug("Configured Loan Criteria: " + str(self.config.criteria))
+
         for loan in resp.json()['loans']:
-            numChecked = 0
-            for criterion in self.config.criteria:
-                if loan[criterion] == self.config.criteria[criterion]:
-                    numChecked += 1
+            numMatched = 0
+
+            for option, value in self.config.criteria.items():
+                if str(loan[option]) in str(value):
+                    numMatched += 1
+
+            logger.debug("NumMatched: " + str(numMatched) +
+                         " of " + str(len(self.config.criteria)))
+
+            if numMatched == len(self.config.criteria):
+                if not lc.checkDuplicate(loan['id']):
+                    loanDict[loan['id']] = (
+                        loan['fundedAmount'] / loan['loanAmount'])
+                    logger.info('Loan id: ' + str(loan['id'])
+                                + ' was a match, funded percentage = ' + str(loanDict[loan['id']]))
+                    logger.debug(loanDict)
                 else:
-                    break
-            if numChecked == len(self.config.criteria):
-                loanDict[loan['id']] = loan['fundedAmount'] / \
-                    loan['loanAmount']
-                logger.info('Loan id:' + str(loan['id']) +
-                            ' was a match, funded percentage = ' + str(loanDict[loan['id']]))
+                    logger.debug("Duplicate id: " + str(loan['id']))
+
+            else:
+                logger.debug("No Matches")
+
         logger.debug('Exiting __getLoans()')
         return sorted(loanDict.items(), key=operator.itemgetter(1), reverse=True)
 
@@ -243,8 +262,10 @@ class LendingClub(object):
         logger.debug('Entering __getPortfolioId()')
         resp = requests.get(self.portfoliosURL, headers=self.header)
         resp.raise_for_status()
+        portfolioId = None
 
         for portfolio in resp.json()['myPortfolios']:
+            logger.debug('Portfolio : ' + str(portfolio))
             if portfolio['portfolioName'] == self.config.portfolioName:
                 portfolioId = portfolio['portfolioId']
                 break
@@ -256,7 +277,7 @@ class LendingClub(object):
         else:
             return portfolioId
 
-    def __postOrder(self, aid, loanId, requestedAmount, portfolioId):
+    def __postOrder(self, aid, loans, requestedAmount, portfolioId):
         """Private method for posting a loan order to Lending Club
 
         Args:
@@ -272,14 +293,26 @@ class LendingClub(object):
         Raises:
             HTTPError:  Any sort of HTTP 400/500 response returned from Lending Club.
         """
-        logger.debug('Entering __postOrder(), aid:' + str(aid) + ', loanId:' + str(loanId) +
-                     ', requestedAmount:' + str(requestedAmount) + ', portfolioId:' + str(portfolioId))
-        payload = json.dumps({'aid': aid,
-                              'orders': [{'loanId': loanId,
-                                          'requestedAmount': float(requestedAmount),
-                                          'portfolioId': portfolioId}]})
-        resp = requests.post(self.ordersURL, headers=self.header, data=payload)
-        retVal = resp.json()
+        logger.debug('Entering __postOrder(), aid:' + str(aid) + ', loans:' + str(loans)
+                     + ', requestedAmount:' + str(requestedAmount) + ', portfolioId:' + str(portfolioId))
+        order = {}
+        order.update({'aid': aid})
+        orders = []
+
+        for loanId, value in loans:
+            orders.append({'loanId': loanId, 'requestedAmount': float(
+                requestedAmount), 'portfolioId': portfolioId})
+
+        order['orders'] = orders
+
+        logger.debug('Buying payload: ' + str(order))
+
+        resp = requests.post(
+            self.ordersURL, headers=self.header, data=json.dumps(order))
+        try:
+            retVal = resp.json()
+        except:
+            logger.debug(str(resp))
 
         # Check for the existence of an 'errors' object in the response.
         # If one exists, display the message.  The 'errors' object implies a HTTP error code.
@@ -291,8 +324,7 @@ class LendingClub(object):
 
         # Only 1 order is placed per call of this method.  Pull the first confirmation and log the amount invested.
         confirmation = retVal['orderConfirmations'][0]
-        logger.info('OrderId:' + str(retVal['orderInstructId']) + ', $' +
-                    str(confirmation['investedAmount']) + ' was invested in loanId:' + str(confirmation['loanId']))
+        logger.info('OrderId:' + str(retVal['orderInstructId']))
         logger.debug('Exiting __postOrder()')
         return decimal.Decimal(str(confirmation['investedAmount']))
 
@@ -311,8 +343,8 @@ class LendingClub(object):
         logger.debug('Entering hasCash()')
 
         self.cash = self.__getCash()
-        logger.info('Cash at Lending Club: '
-                    + str(self.cash.quantize(decimal.Decimal('.01'), decimal.ROUND_05UP)))
+        logger.info('Cash at Lending Club: ' +
+                    str(self.cash.quantize(decimal.Decimal('.01'), decimal.ROUND_05UP)))
         investMin = self.cash - self.config.reserveCash - self.config.investAmount
         logger.debug('Exiting hasCash()')
         if (investMin >= 0):
@@ -337,8 +369,8 @@ class LendingClub(object):
         logger.debug('Entering hasLoans()')
         self.loans = self.__getLoans()
 
-        logger.info('Total number of matching loans available: '
-                    + str(len(self.loans)))
+        logger.info('Total number of matching loans available: ' +
+                    str(len(self.loans)))
 
         logger.debug('Exiting hasLoans()')
         return len(self.loans) > 0
@@ -360,8 +392,8 @@ class LendingClub(object):
         logger.debug('Entering buy()')
         if self.portfolioId is None:
             self.portfolioId = self.__getPortfolioId()
-        self.cash -= self.__postOrder(self.config.investorId, self.loans.pop(0)[
-                                      0], self.config.investAmount, self.portfolioId)
+        self.cash -= self.__postOrder(self.config.investorId,
+                                      self.loans, self.config.investAmount, self.portfolioId)
         logger.debug('Exiting buy()')
 
     def __getTradeNotes(self):
@@ -371,10 +403,11 @@ class LendingClub(object):
         notesDict = []
         listingsheader = {'Connection': None, 'Accept-Encoding': None, 'User-Agent': None, 'Authorization': self.config.authKey,
                           'Accept': 'text/csv'}
-        with closing(requests.get('https://api.lendingclub.com/api/investor/v1/secondarymarket/listings?updatedSince=' + str(self.config.ReRunTime), stream=True, headers=listingsheader)) as r:
+        with closing(requests.get('https://api.lendingclub.com/api/investor/v1/secondarymarket/listings?updatedSince=' + str(self.config.ReRunTime), stream=True, headers=listingsheader))as r:
             if r.ok:
+                r.encoding = r.apparent_encoding
                 reader = csv.DictReader(
-                    r.iter_lines(), delimiter=',', quotechar='"')
+                    codecs.iterdecode(r.iter_lines(), 'utf-8'), delimiter=',', quotechar='"')
                 for row in reader:
                     numChecked = 0
                     for criterion in self.config.criteriaTraded:
@@ -410,10 +443,10 @@ class LendingClub(object):
         Raises:
             HTTPError:  Any sort of HTTP 400 / 500 response returned from Lending Club.
         """
-        logger.debug('Entering hasLoans()')
+        logger.debug('Entering hasNotes()')
         self.notes = self.__getTradeNotes()
-        logger.info('Total number of matching Traded Notes available: '
-                    + str(len(self.notes)))
+        logger.info('Total number of matching Traded Notes available: ' +
+                    str(len(self.notes)))
 
         logger.debug('Exiting hasNotes()')
         return len(self.notes) > 0
@@ -437,28 +470,30 @@ class LendingClub(object):
         expirationDate = datetime.datetime.strftime(
             datetime.date.today(), '%Y-%m-%d')
 
-        logger.debug('Entering __postNotesOrder()', 'noteId', str(
-            noteInfo['noteId']), 'price', str(noteInfo['price']))
+        logger.debug('Entering __postNotesOrder() noteId: '
+                     + noteInfo['noteId'] + ' price: ' + noteInfo['price'])
+
         payload = '[' + json.dumps({'noteId': str(noteInfo['noteId']),
                                     'price': float(noteInfo['price']),
                                     'expirationDate': str(expirationDate),
                                     'orderType': 'BUY'}) + ']'
+
         resp = requests.post(self.tradesOrdersURL,
                              headers=self.header, data=payload)
         if resp.ok:
             retVal = resp.json()
             resp.raise_for_status()
-            print retVal
+            print (retVal)
             # Only 1 order is placed per call of this method.  Pull the first confirmation and log the amount invested.
             try:
-                logger.info(str(retVal['status']) + ' $' +
-                            float(noteInfo['price']) + ' was invested.')
+                logger.info(str(retVal['status']) + ' $'
+                            + float(noteInfo['price']) + ' was invested.')
                 logger.debug('Exiting __postNotesOrder()')
                 return decimal.Decimal(str(noteInfo['price']))
             except:
                 return 0
         else:
-            print resp.text
+            print (resp.text)
             logger.info('Error __postNotesOrder() ' + resp.reason)
             return 0
 
@@ -485,6 +520,20 @@ class LendingClub(object):
                         self.config.investorId, noteInfo)
         logger.debug('Exiting buyNotes()')
 
+    def getNotesOwned(self):
+        logger.debug('Entering __getNotesOwned()')
+        resp = requests.get(self.NotesOwnedUrl, headers=self.header)
+        resp.raise_for_status()
+        logger.debug('Exiting __getNotesOwned()')
+#        logger.debug(str(resp.json()))
+        return (resp.json()['myNotes'])
+
+    def checkDuplicate(self, loanId):
+        for note in notesowned:
+            if str(note['loanId']) == str(loanId):
+                logger.debug('Duplicate loanId found.')
+                return True
+
 
 # Main code block.  Instantiates the Lending API access, then loops while cash is available to invest
 # and loans meeting the user-defined criteria exist.
@@ -492,14 +541,17 @@ try:
     lc = LendingClub(ConfigData(CONFIG_FILENAME))
 
     while lc.hasCash():
+        notesowned = lc.getNotesOwned()
         if (int(lc.config.buyLoans) == 1) and lc.hasLoans():
             lc.buy()
+
         if (int(lc.config.buyTradedNotes) == 1) and lc.hasNotes():
             lc.buyNotes()
 
-        print(" Sleeping  " + str((lc.config.ReRunTime) / 60) + " min....")
+        logger.info(" Sleeping " +
+                    str((lc.config.ReRunTime) / 60) + " min....")
         time.sleep(int(lc.config.ReRunTime))
-        print("Running again...")
+        logger.info("Running again...")
 
 
 except:
